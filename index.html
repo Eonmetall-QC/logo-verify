@@ -54,14 +54,15 @@ img,canvas{max-width:100%}
 .brand .sep{width:1px;height:30px;background:var(--line)}
 .app-name{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.02em;line-height:1;white-space:nowrap}
 .app-name small{display:block;font-family:"Barlow",sans-serif;font-weight:500;font-size:13px;letter-spacing:0;color:var(--muted);margin-top:3px}
-.installBtn{min-height:40px;padding:6px 14px;font-size:14px;border-color:var(--scan);color:var(--scan);background:transparent}
-.installBtn[hidden]{display:none}
 .mchip{margin-left:auto;display:flex;align-items:center;gap:10px;padding:6px 6px 6px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .mchip .t{font-size:12px;color:var(--muted);line-height:1.2}
 .mchip .t b{display:block;color:var(--ink);font-size:14px;font-weight:600}
 .mchip img{height:32px;background:#fff;border-radius:6px;padding:4px 6px;display:block}
 .mchip img.mask{filter:invert(1)}
 @media (max-width:640px){.top{gap:10px}.brand{gap:10px}.brand .sep,.app-name small{display:none}.brand img{height:17px}.app-name{font-size:17px}.mchip .t{display:none}.mchip{padding:4px}.mchip img{height:24px;padding:3px 4px}}
+
+.installBtn{min-height:40px;padding:6px 14px;font-size:14px;border-color:var(--scan);color:var(--scan);background:transparent}
+.installBtn[hidden]{display:none}
 
 /* layout */
 main{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;padding:18px clamp(12px,3vw,28px) 28px;max-width:1360px;margin:0 auto}
@@ -224,11 +225,11 @@ dialog::backdrop{background:rgba(3,8,24,.7);backdrop-filter:blur(3px)}
     <span class="sep" aria-hidden="true"></span>
     <div class="app-name">Logo Verify<small>Customer logo inspection</small></div>
   </div>
+  <button class="installBtn" id="installBtn" hidden>Install app</button>
   <div class="mchip" title="Customer master in use">
     <div class="t">Customer master<b id="masterName">Global Industrial</b></div>
     <img id="masterImg" alt="Customer master logo">
   </div>
-  <button class="installBtn" id="installBtn" hidden>Install app</button>
 </header>
 
 <main>
@@ -244,9 +245,6 @@ dialog::backdrop{background:rgba(3,8,24,.7);backdrop-filter:blur(3px)}
         </label>
         <label class="field">Source
           <select id="source"><option>Supplier incoming</option><option>Internal production</option></select>
-        </label>
-        <label class="field">Inspector
-          <input type="text" id="inspector" placeholder="Name">
         </label>
       </div>
     </section>
@@ -279,7 +277,7 @@ dialog::backdrop{background:rgba(3,8,24,.7);backdrop-filter:blur(3px)}
         <summary>Capture options</summary>
         <div class="row">
           <label class="field">Logo colour vs surface
-            <select id="polarity"><option value="auto">Detect automatically</option><option value="light">Light logo on dark surface</option><option value="dark">Dark logo on light surface</option></select>
+            <select id="polarity"><option value="auto">Detect automatically</option><option value="light">Light logo on dark surface</option><option value="dark">Dark logo on light surface</option><option value="carton">Blue logo on brown carton</option></select>
           </label>
         </div>
       </details>
@@ -369,6 +367,8 @@ const GIS_REGIONS = [
 ];
 const GRID_REGIONS = (()=>{const r=[];const cols=["left","centre-left","centre-right","right"];for(let j=0;j<2;j++)for(let i=0;i<4;i++)r.push({name:(j?"Lower ":"Upper ")+cols[i],x0:i/4,x1:(i+1)/4,y0:j/2,y1:(j+1)/2});return r;})();
 const RW = 900;
+// ways to read "ink" from a colour pixel: light paint, dark ink, any dark or strong colour, blue ink on brown carton
+const INK={light:(r,g,b)=>Math.min(r,g,b),dark:(r,g,b)=>255-Math.max(r,g,b),deep:(r,g,b)=>255-Math.min(r,g,b),blue:(r,g,b)=>Math.max(0,Math.min(255,100+b-r))};
 const MODELS={"272150": "60\" Posts 4-IN-A-BOX", "798922": "Portable Stack Rack, 48\"W x 48\"D x 56.8\"H", "798923": "Portable Stack Rack, 48\"W x 48\"D x 44.8\"H", "798924": "Portable Stack Rack, 48\"W x 42\"D x 44.8\"H", "798925": "Portable Stack Rack, 48\"W x 42\"D x 56.8\"H", "798926": "Portable Stack Rack, 60\"W x 42\"D x 44.8\"H", "798927": "Portable Stack Rack, 60\"W x 42\"D x 56.8\"H", "293283": "Modular Bar Rack Horizontal Stacking 16\"W x 12\"D x 14\"H", "293284": "Modular Bar Rack Horizontal Stacking 19\"W x 14\"D x 18\"H", "293285": "Modular Bar Rack Horizontal Stacking 22\"W x 15\"D x 21\"H", "293286": "Modular Bar Rack Horizontal Stacking 26\"W x 16\"D x 24\"H", "187CP17": "Rivet Lock Dolly Base 18\" x 36\"", "187CP18": "Rivet Lock Dolly Base 24\" x 36\"", "187CP19": "Rivet Lock Dolly Base 24\" x 48\"", "238CP43": "Rivet Lock Dolly Base 24\" x 60\""};
 
 const $ = id => document.getElementById(id);
@@ -522,21 +522,21 @@ function analyse(rot){rot=rot||0;
   cx.save();cx.translate(cw/2,ch/2);cx.rotate(rot*Math.PI/180);cx.drawImage(src,rect.x,rect.y,rect.w,rect.h,-dw/2,-dh/2,dw,dh);cx.restore();
   const px=cx.getImageData(0,0,cw,ch).data;
   // 2. separate ink from surface
-  const lightV=new Uint8Array(cw*ch),darkV=new Uint8Array(cw*ch);
-  for(let i=0;i<cw*ch;i++){const r=px[4*i],g=px[4*i+1],b=px[4*i+2];lightV[i]=Math.min(r,g,b);darkV[i]=255-Math.max(r,g,b);}
   const pol=$("polarity").value;
+  const kinds=pol==="light"?["light"]:pol==="dark"?["dark","deep"]:pol==="carton"?["blue","deep"]:["light","dark","deep","blue"];
+  const chan={};for(const kd of kinds){const v=new Uint8Array(cw*ch),fn=INK[kd];for(let i=0;i<cw*ch;i++)v[i]=fn(px[4*i],px[4*i+1],px[4*i+2]);chan[kd]=v;}
   function bin(v){const t=otsu(v);const m=new Uint8Array(v.length);let s=0;for(let i=0;i<v.length;i++){m[i]=v[i]>t?1:0;s+=m[i];}return {m,frac:s/v.length};}
   const r0=Math.max(1,Math.round(cw/900));
   // find the logo with a local (adaptive) threshold so bright background objects don't interfere
-  const vs=[];if(pol!=="dark")vs.push(lightV);if(pol!=="light")vs.push(darkV);
+  
   const LR=Math.max(15,Math.round(Math.max(cw,ch)/25));
-  let found=null,fv=null;
-  for(const v of vs){const fl=new Float32Array(v.length);for(let i=0;i<v.length;i++)fl[i]=v[i];const lm=boxBlur(fl,cw,ch,LR);
+  let found=null,fv=null,fk=null;
+  for(const kd of kinds){const v=chan[kd];const fl=new Float32Array(v.length);for(let i=0;i<v.length;i++)fl[i]=v[i];const lm=boxBlur(fl,cw,ch,LR);
     let am=new Uint8Array(v.length);for(let i=0;i<v.length;i++)am[i]=v[i]>lm[i]+20?1:0;am=dilate(erode(am,cw,ch,r0),cw,ch,r0);
-    for(const mk of [am,dilate(erode(bin(v).m,cw,ch,r0),cw,ch,r0)]){const f=findLogo(mk,cw,ch,M);if(f&&(!found||f.corr>found.corr)){found=f;fv=v;}}}
+    for(const mk of [am,dilate(erode(bin(v).m,cw,ch,r0),cw,ch,r0)]){const f=findLogo(mk,cw,ch,M);if(f){f.rank=f.corr+(kd==="blue"?0.06:0);if(!found||f.rank>found.rank){found=f;fv=v;fk=kd;}}}}
   const userBox=!(rect.x<=1&&rect.y<=1&&rect.w>=src.width-2&&rect.h>=src.height-2);
-  let m,inkLight=true;
-  if(found&&found.corr>=0.35){inkLight=(fv===lightV);
+  let m,inkKind=kinds[0];
+  if(found&&found.corr>=0.35){inkKind=fk;
     // re-threshold only around the logo for a clean shape
     const b=found.box,bw0=b[2]-b[0],bh0=b[3]-b[1];const ex=Math.round(bw0*.06),ey=Math.round(bh0*.15);
     const X0=Math.max(0,b[0]-ex),Y0=Math.max(0,b[1]-ey),X1=Math.min(cw,b[2]+ex),Y1=Math.min(ch,b[3]+ey);
@@ -546,7 +546,9 @@ function analyse(rot){rot=rot||0;
     const c=found.coarse;const tb=tightBox(m,cw,ch,c[0],c[1],c[2],c[3]);if(tb)found.box=tb;
   }else if(userBox){
     // the box was drawn by hand: treat everything inside it as the logo
-    let r=pol==="dark"?bin(darkV):bin(lightV);inkLight=pol!=="dark";if(pol==="auto"&&r.frac>0.5){r=bin(darkV);inkLight=false;}
+    // pick the ink reading that separates ink from surface best (ink must be the smaller part)
+    let r=null,bs=-1;for(const kd of kinds){const v=chan[kd],q=bin(v);if(q.frac<=0.02||q.frac>=0.6)continue;const t=otsu(v);let a=0,na=0,c=0,nc=0;for(let i=0;i<v.length;i++){if(v[i]>t){a+=v[i];na++;}else{c+=v[i];nc++;}}const sep=(na?a/na:0)-(nc?c/nc:0);if(sep>bs){bs=sep;r=q;inkKind=kd;}}
+    if(!r)throw new Error("No logo found inside the box. Redraw the box around the logo, or set the logo colour under Capture options.");
     m=dilate(erode(r.m,cw,ch,r0),cw,ch,r0);const bb0=bodyBox(m,cw,ch);
     if(!bb0)throw new Error("No logo found inside the box. Redraw the box around the logo, or set the logo colour under Settings.");
     found={box:bb0};
@@ -568,7 +570,7 @@ function analyse(rot){rot=rot||0;
   // padded aligned view (logo plus margin), for marks that sit outside the main letter block, e.g. ™
   const MX=Math.round(W*.12),MY=Math.round(H*.35),PW=W+2*MX,PH=H+2*MY;
   const pad2=resample(crop,bb[0]-bw*MX/W,bb[1]-bh*MY/H,bw*PW/W,bh*PH/H,PW,PH);
-  const inkOf=(r,g2,b2)=>inkLight?Math.min(r,g2,b2):255-Math.max(r,g2,b2);
+  const inkOf=INK[inkKind];
   const Qs=new Float32Array(PW*PH);for(let i=0;i<PW*PH;i++)Qs[i]=pad2[4*i+3]?inkOf(pad2[4*i],pad2[4*i+1],pad2[4*i+2]):-1;
   const Q=new Float32Array(PW*PH).fill(-1);
   for(let v=0;v<PH;v++)for(let u=0;u<PW;u++){const x=u-MX,y=v-MY;const d=Hf[6]*x+Hf[7]*y+1;const X=(Hf[0]*x+Hf[1]*y+Hf[2])/d+MX,Y=(Hf[3]*x+Hf[4]*y+Hf[5])/d+MY;
@@ -589,7 +591,7 @@ function analyse(rot){rot=rot||0;
   // small marks (™) are below the photo's resolution for shape scoring: check presence only
   const regions=M.regions.map(g=>{const x0=Math.round(g.x0*W),y0=Math.round(g.y0*H),x1=Math.round(g.x1*W),y1=Math.round(g.y1*H);
     if(!g.presence)return Object.assign({name:g.name},f1(x0,y0,x1,y1));
-    const t=markCheck(Pw,padView,W,H,R,g,inkLight);return {name:g.name,presence:true,present:t.score>=50,score:t.score,dbg:t};});
+    const t=markCheck(Pw,padView,W,H,R,g,inkKind);return {name:g.name,presence:true,present:t.score>=50,score:t.score,dbg:t};});
   // overall = 90% logo body + 10% small marks (™), so a missing ™ is visible in the score
   // in the maps, small marks are shown by their presence result (their outline is below photo resolution)
   M.regions.forEach((g,k)=>{if(!g.presence)return;const ok=regions[k].score>=50;
@@ -597,13 +599,13 @@ function analyse(rot){rot=rot||0;
   const marks=regions.filter(r=>r.presence);const overall=Object.assign({},body);
   if(marks.length){const ms=marks.reduce((a,r)=>a+r.score,0)/marks.length;overall.score=body.score*0.9+ms*0.1;}
   overall.specks=specks;
-  return {overall,regions,W,H,R,Cs,missing,extra,Pw,padView,fit:best,rot,dbg:{crop,m,box:bb,corr:found.corr}};
+  return {overall,regions,W,H,R,Cs,missing,extra,Pw,padView,fit:best,rot,inkKind,dbg:{crop,m,box:bb,corr:found.corr}};
 }
 // Small marks (™): read the aligned photo directly (no clean-up filter, which erases thin strokes).
 // Score = how well the photo's brightness pattern follows the master's ™ shape, and how strong its contrast is
 // compared with the rest of the logo. Glare is a broad blob, so it does not correlate with the ™ shape.
-function markCheck(Pw,pv,W,H,R,g,inkLight){
-  const val=i=>{const r=Pw[3*i],gg=Pw[3*i+1],b=Pw[3*i+2];return inkLight?Math.min(r,gg,b):255-Math.max(r,gg,b);};
+function markCheck(Pw,pv,W,H,R,g,inkKind){
+  const fn=INK[inkKind];const val=i=>fn(Pw[3*i],Pw[3*i+1],Pw[3*i+2]);
   // logo-wide ink and background brightness, to judge how strong the mark is
   const eR=erode(R,W,H,1),dR=dilate(R,W,H,4);let si=0,ni=0,sb=0,nb=0;
   for(let i=0;i<W*H;i++){if(eR[i]){si+=val(i);ni++;}else if(!dR[i]){sb+=val(i);nb++;}}
@@ -620,29 +622,40 @@ function markCheck(Pw,pv,W,H,R,g,inkLight){
   const Q0=pv.Q;const valid=new Float32Array(PW*PH),qz=new Float32Array(PW*PH);for(let i=0;i<PW*PH;i++){if(Q0[i]>=0){valid[i]=1;qz[i]=Q0[i];}}
   const hr=Math.max(3,Math.round(th0*0.9));const mq=boxBlur(qz,PW,PH,hr),mv=boxBlur(valid,PW,PH,hr);
   const Q=new Float32Array(PW*PH);for(let i=0;i<PW*PH;i++)Q[i]=valid[i]&&mv[i]>0.5?qz[i]-mq[i]/mv[i]:-9999;
-  let best={corr:-1,ratio:0};
-  for(let s=0.8;s<=1.9;s+=0.1){const tw=Math.max(4,Math.round(tw0*s)),th=Math.max(3,Math.round(th0*s));
-    const T=new Float32Array(tw*th);for(let y=0;y<th;y++)for(let x=0;x<tw;x++)T[y*tw+x]=T0[Math.min(th0-1,(y/s)|0)*tw0+Math.min(tw0-1,(x/s)|0)];
-    const Tb=blur3(T,tw,th,1);let st=0,stt=0;for(let i=0;i<Tb.length;i++){st+=Tb[i];stt+=Tb[i]*Tb[i];}const n=tw*th,tvar=stt-st*st/n;
-    const rx=Math.round(W*.06),ry=Math.round(H*.18);
-    for(let oy=-ry;oy<=ry;oy++)for(let ox=-rx;ox<=rx;ox++){
-      const u0=Math.round(cxm+ox-tw/2)+MX,v0=Math.round(cym+oy-th/2)+MY;if(u0<0||v0<0||u0+tw>PW||v0+th>PH)continue;
-      let sv=0,svv=0,svt=0,bad=false;
-      for(let y=0;y<th&&!bad;y++){const row=(v0+y)*PW+u0;for(let x=0;x<tw;x++){const v=Q[row+x];if(v<-9000){bad=true;break;}const t=Tb[y*tw+x];sv+=v;svv+=v*v;svt+=v*t;}}
-      if(bad)continue;const vv=svv-sv*sv/n;if(vv<1e-6)continue;const c=(svt-sv*st/n)/Math.sqrt(vv*tvar);
-      if(c>best.corr)best={corr:c,s,ox,oy,u0,v0,tw,th,T};}}
+  let best={corr:-1,ratio:0};const cands=[];
+  // printed ™ size varies a lot between print methods (carton ™ is often 2-4x the artwork size), and its width can differ from its height
+  for(let s=0.8;s<=4.3;s*=1.1)for(const ax of [1,1.25]){const sx=s*ax,sy=s;const tw=Math.max(4,Math.round(tw0*sx)),th=Math.max(3,Math.round(th0*sy));
+    const T=new Float32Array(tw*th);for(let y=0;y<th;y++)for(let x=0;x<tw;x++)T[y*tw+x]=T0[Math.min(th0-1,(y/sy)|0)*tw0+Math.min(tw0-1,(x/sx)|0)];
+    const Tb=blur3(T,tw,th,1);let st=0,stt=0;for(let i=0;i<Tb.length;i++){st+=Tb[i];stt+=Tb[i]*Tb[i];}const n=tw*th,tvar=stt-st*st/n;if(tvar<1e-6)continue;
+    const rx=Math.max(Math.round(W*.06),Math.round(tw*.9)),ry=Math.max(Math.round(H*.18),Math.round(th*.8));
+    const at=(ox,oy)=>{const u0=Math.round(cxm+ox-tw/2)+MX,v0=Math.round(cym+oy-th/2)+MY;if(u0<0||v0<0||u0+tw>PW||v0+th>PH)return -2;
+      let sv=0,svv=0,svt=0;for(let y=0;y<th;y++){const row=(v0+y)*PW+u0;for(let x=0;x<tw;x++){const v=Q[row+x];if(v<-9000)return -2;const t=Tb[y*tw+x];sv+=v;svv+=v*v;svt+=v*t;}}
+      const vv=svv-sv*sv/n;if(vv<1e-6)return -2;return (svt-sv*st/n)/Math.sqrt(vv*tvar);};
+    const stp=Math.max(1,Math.round(s/1.4));let lb={c:-2};
+    for(let oy=-ry;oy<=ry;oy+=stp)for(let ox=-rx;ox<=rx;ox+=stp){const c=at(ox,oy);if(c>lb.c)lb={c,ox,oy};}
+    if(stp>1&&lb.c>-2){const o=lb;for(let oy=o.oy-stp+1;oy<o.oy+stp;oy++)for(let ox=o.ox-stp+1;ox<o.ox+stp;ox++){const c=at(ox,oy);if(c>lb.c)lb={c,ox,oy};}}
+    if(lb.c>0.6){const u0=Math.round(cxm+lb.ox-tw/2)+MX,v0=Math.round(cym+lb.oy-th/2)+MY;cands.push({corr:lb.c,s,ox:lb.ox,oy:lb.oy,u0,v0,tw,th,T});}
+    if(lb.c>best.corr){const u0=Math.round(cxm+lb.ox-tw/2)+MX,v0=Math.round(cym+lb.oy-th/2)+MY;best={corr:lb.c,s,ox:lb.ox,oy:lb.oy,u0,v0,tw,th,T};}}
   // contrast of the mark against the texture around it (orange-peel paint and glare make random speckles)
-  if(best.T){const {u0,v0,tw,th,T}=best;const Td=dilate(Uint8Array.from(T,v=>v>0?1:0),tw,th,2);let ink=0,ni2=0;
+  // other logo ink next to the ™ (the L) is not background
+  const Rm=R.slice();for(let y=ry0;y<ry1;y++)for(let x=rx0;x<rx1;x++)Rm[y*W+x]=0;const Ro=dilate(Rm,W,H,3);
+  // a large ™ needs a wider background filter, or its own strokes are filtered away
+  const qCache=new Map();const qFor=th=>{if(th<=th0*1.5)return Q;const hr2=Math.round(th*0.9/2)*2;if(qCache.has(hr2))return qCache.get(hr2);
+    const mq2=boxBlur(qz,PW,PH,hr2),mv2=boxBlur(valid,PW,PH,hr2);const o=new Float32Array(PW*PH);for(let i=0;i<PW*PH;i++)o[i]=valid[i]&&mv2[i]>0.5?qz[i]-mq2[i]/mv2[i]:-9999;qCache.set(hr2,o);return o;};
+  function contrast(c){const Q=qFor(c.th);const {u0,v0,tw,th,T}=c;const Td=dilate(Uint8Array.from(T,v=>v>0?1:0),tw,th,2);let ink=0,ni2=0;
     for(let y=0;y<th;y++)for(let x=0;x<tw;x++)if(T[y*tw+x]>0){ink+=Q[(v0+y)*PW+u0+x];ni2++;}
     const ex=Math.round(tw*.5),ey=Math.round(th*.6);let sb=0,sbb=0,nb2=0;
     for(let y=-ey;y<th+ey;y++)for(let x=-ex;x<tw+ex;x++){const U=u0+x,V=v0+y;if(U<0||V<0||U>=PW||V>=PH)continue;const q=Q[V*PW+U];if(q<-9000)continue;
-      if(x>=0&&y>=0&&x<tw&&y<th&&Td[y*tw+x])continue;sb+=q;sbb+=q*q;nb2++;}
+      if(x>=0&&y>=0&&x<tw&&y<th&&Td[y*tw+x])continue;{const mx=U-MX,my=V-MY;if(mx>=0&&my>=0&&mx<W&&my<H&&Ro[my*W+mx])continue;}sb+=q;sbb+=q*q;nb2++;}
     const mb=nb2?sb/nb2:0,sd=nb2?Math.sqrt(Math.max(0,sbb/nb2-mb*mb)):99;const mi=ni2?ink/ni2:0;
-    best.ratio=(mi-mb)/span;best.snr=(mi-mb)/(sd+2);}
-  else{best.ratio=0;best.snr=0;}
-  const sc=Math.max(0,Math.min(1,Math.min((best.corr-0.6)/0.2,(best.snr-1.5)/2.5)));
-  return {score:100*sc,corr:best.corr,ratio:best.ratio,snr:best.snr,s:best.s,ox:best.ox,oy:best.oy};
+    c.ratio=(mi-mb)/span;c.snr=(mi-mb)/(sd+2);c.sc=Math.max(0,Math.min(1,Math.min((c.corr-0.6)/0.2,(c.snr-1.5)/2.5)));return c;}
+  // keep the size that shows the clearest ™ (shape match and contrast together)
+  if(!cands.length&&best.T)cands.push(best);
+  let pick=null;for(const c of cands){contrast(c);if(!pick||c.sc>pick.sc||(c.sc===pick.sc&&c.corr>pick.corr))pick=c;}
+  if(!pick)return {score:0,corr:best.corr,ratio:0,snr:0,s:0,ox:0,oy:0};
+  return {score:100*pick.sc,corr:pick.corr,ratio:pick.ratio,snr:pick.snr,s:pick.s,ox:pick.ox,oy:pick.oy};
 }
+
 function analyseBest(){const acc=+$("tAcc").value||90;let best=null,err=null;
   for(const rot of [0,90,270,180]){
     try{const r=analyse(rot);if(!best||r.overall.score>best.overall.score)best=r;}catch(e){err=err||e;}
@@ -709,7 +722,7 @@ function buildReport(res,g,entry){
   pc.getContext("2d").drawImage(crop,sx,sy,sw,sh,0,0,pw,ph);
   const keep=mode;mode="diff";const dc=document.createElement("canvas");renderDiff(res,dc);mode=keep;
   const acc=+$("tAcc").value||90,rej=+$("tRej").value||80;
-  return {id,date:d.toLocaleString(),model:entry.model||"–",desc:entry.desc||"",po:entry.part||"–",source:entry.source,inspector:$("inspector").value.trim()||"–",
+  return {id,date:d.toLocaleString(),model:entry.model||"–",desc:entry.desc||"",po:entry.part||"–",source:entry.source,
     customer:master.name,score:res.overall.score,verdict:g.word,why:g.why,k:g.k,
     regions:res.regions.map(r=>({name:r.name,score:r.score,status:r.presence?(r.score>=80?"OK":r.score>=50?"Faint":"Missing"):(r.score>=acc?"OK":r.score>=rej?"Check":"Wrong")})),
     photo:pc.toDataURL("image/jpeg",.88),photoAR:ph/pw,diff:dc.toDataURL("image/png"),diffAR:dc.height/dc.width,master:master.img,acc,rej,tol:$("tol").selectedOptions[0].textContent};
@@ -723,7 +736,7 @@ async function makePdf(r){
   doc.setFont("helvetica","bold");doc.setFontSize(18);doc.text("Logo Inspection Report",L,y);
   doc.setFont("helvetica","normal");doc.setFontSize(9);doc.setTextColor(90);doc.text(`Report no. ${r.id}`,L+Wd,y-5,{align:"right"});doc.text(`Customer logo: ${r.customer}`,L+Wd,y,{align:"right"});doc.setTextColor(0);
   y+=4;doc.setDrawColor(0);doc.setLineWidth(.5);doc.line(L,y,L+Wd,y);y+=6;
-  const info=[["Date / time checked",r.date],["Model",r.model],["Description",r.desc||"–"],["PO / lot no.",r.po],["Source",r.source],["Inspector",r.inspector]];
+  const info=[["Date / time checked",r.date],["Model",r.model],["Description",r.desc||"–"],["PO / lot no.",r.po],["Source",r.source]];
   doc.setFontSize(10.5);doc.setLineWidth(.2);doc.setDrawColor(170);
   info.forEach(([k,v])=>{doc.setFont("helvetica","bold");doc.text(k,L+2,y);doc.setFont("helvetica","normal");doc.text(doc.splitTextToSize(String(v),125),L+52,y);y+=2.5;doc.line(L,y,L+Wd,y);y+=5;});
   y+=1;doc.setDrawColor(...col);doc.setFillColor(...col.map(c=>Math.round(c*.12+255*.88)));doc.setLineWidth(.8);doc.roundedRect(L,y,Wd,20,2,2,"FD");
@@ -753,7 +766,7 @@ async function downloadPdf(r){const note=$("repNote");note.textContent="Preparin
     else{const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fn;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);note.textContent="PDF downloaded.";}
   }catch(e){note.textContent=e&&e.code==="declined"?"Save cancelled.":(e.message||"Could not create the PDF.");}}
 function printReport(r){
-  const rows=[["Date / time checked",r.date],["Model",r.model],["Description",r.desc||"–"],["PO / lot no.",r.po],["Source",r.source],["Inspector",r.inspector]].map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
+  const rows=[["Date / time checked",r.date],["Model",r.model],["Description",r.desc||"–"],["PO / lot no.",r.po],["Source",r.source]].map(([k,v])=>`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("");
   const col=r.k==="pass"?"#1d7a45":r.k==="warn"?"#a86a0c":"#bf2f24";
   $("printReport").innerHTML=`<img class="plogo" src="${EON_LOGO}" alt="Eonmetall"><h1>Logo Inspection Report</h1><div>Report no. ${esc(r.id)} &nbsp; | &nbsp; Customer logo: ${esc(r.customer)}</div>
     <table>${rows}</table><div class="res" style="color:${col};border-color:${col}">${r.score.toFixed(1)}% &nbsp; ${esc(r.verdict)}<div style="font-size:10pt;font-weight:400;color:#000">${esc(r.why)}</div></div>
@@ -924,8 +937,6 @@ dlg.addEventListener("cancel", () => { $("pinIn").value = ""; });
 $("cam").onchange=e=>loadPhoto(e.target.files[0]).catch(()=>alert("That photo could not be opened."));
 $("gal").onchange=e=>loadPhoto(e.target.files[0]).catch(()=>alert("That photo could not be opened."));
 try{const lm=localStorage.getItem("logoverify.model");if(lm)$("model").value=lm;}catch(e){}
-try{const ins=localStorage.getItem("logoverify.inspector");if(ins)$("inspector").value=ins;}catch(e){}
-$("inspector").onchange=()=>{try{localStorage.setItem("logoverify.inspector",$("inspector").value.trim())}catch(e){}};
 $("model").onchange=()=>{try{localStorage.setItem("logoverify.model",$("model").value)}catch(e){}};
 $("rotBtn").onclick=()=>src&&rotate();
 $("checkBtn").onclick=runCheck;
