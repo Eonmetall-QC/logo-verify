@@ -125,6 +125,7 @@ details .row{margin-top:10px}
 .lock img{position:absolute;inset:0;width:100%;height:100%;opacity:0;mix-blend-mode:screen}
 .lock.cmp img{animation:ghost 1s ease-in-out infinite alternate}
 @keyframes ghost{from{opacity:.25}to{opacity:.85}}
+.lock.flip .tag{rotate:180deg}
 .lock .tag{position:absolute;left:-6px;top:-30px;font:600 12px/1 var(--display);letter-spacing:.05em;color:#06132e;background:#8ff0fb;padding:5px 7px;border-radius:4px;white-space:nowrap}
 
 /* result */
@@ -271,7 +272,7 @@ dialog::backdrop{background:rgba(3,8,24,.7);backdrop-filter:blur(3px)}
       </div>
       <div class="row" style="margin-top:14px">
         <button class="go" id="checkBtn" disabled>Check logo</button>
-        <span class="hint" style="margin:0;flex:1 1 220px">The logo is found automatically. If the photo has more than one logo, drag a box around the one to check.</span>
+        <span class="hint" style="margin:0;flex:1 1 220px">The logo is found automatically. If the photo has more than one logo, drag a box around the one to check. Any angle works, even sideways or upside down. For a sharp photo, tap the logo on the camera screen to focus, then hold still.</span>
       </div>
       <details>
         <summary>Capture options</summary>
@@ -471,7 +472,7 @@ function masterTemplate(M,tw){const key=tw;const c=tmplCache.get(key);if(c&&c.M=
   const t=new Float32Array(tw*th);for(let y=0;y<th;y++)for(let x=0;x<tw;x++){let a=0,n=0;const sx0=Math.floor(x*M.w/tw),sx1=Math.floor((x+1)*M.w/tw),sy0=Math.floor(y*M.h/th),sy1=Math.floor((y+1)*M.h/th);for(let yy=sy0;yy<sy1;yy++)for(let xx=sx0;xx<sx1;xx++){a+=M.mask[yy*M.w+xx];n++;}t[y*tw+x]=a/n;}
   let mean=0;for(const v of t)mean+=v;mean/=t.length;const z=new Float32Array(t.length);let zz=0;for(let i=0;i<t.length;i++){z[i]=t[i]-mean;zz+=z[i]*z[i];}
   const o={M,tw,th,z,zz};tmplCache.set(key,o);return o;}
-function findLogo(m,cw,ch,M){
+function findLogo(m,cw,ch,M,minF){minF=minF||0.2;
   const MA=M.w/M.h;
   const f=Math.max(1,Math.ceil(Math.max(cw,ch)/400));const sw=Math.ceil(cw/f),sh=Math.ceil(ch/f);
   const s=new Float32Array(sw*sh);const cnt=new Float32Array(sw*sh);for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){const j=((y/f)|0)*sw+((x/f)|0);s[j]+=m[y*cw+x];cnt[j]++;}for(let j=0;j<s.length;j++)s[j]/=cnt[j]||1;
@@ -485,7 +486,7 @@ function findLogo(m,cw,ch,M){
     const varv=svv-sv*sv/n;return varv>1e-9?svz/Math.sqrt(varv*T.zz):-1;}
   const T1=masterTemplate(M,32),T2=masterTemplate(M,120);
   let cands=[];
-  for(let w=Math.max(24,0.2*Math.min(sw,sh*MA));w<=sw;w*=1.1){const h=w/MA;if(h>sh)break;const st=Math.max(1,Math.round(w/24));
+  for(let w=Math.max(24,minF*Math.min(sw,sh*MA));w<=sw;w*=1.1){const h=w/MA;if(h>sh)break;const st=Math.max(1,Math.round(w/24));
     for(let y=0;y+h<=sh;y+=st)for(let x=0;x+w<=sw;x+=st){const b=[x,y,Math.min(sw,Math.round(x+w)),Math.min(sh,Math.round(y+h))];const c=corr(b,T1);if(c>0.3)cands.push({c,b});}}
   cands.sort((a,b)=>b.c-a.c);
   const picked=[];for(const k of cands){if(picked.length>=6)break;if(picked.some(p=>{const ix=Math.max(0,Math.min(p.b[2],k.b[2])-Math.max(p.b[0],k.b[0])),iy=Math.max(0,Math.min(p.b[3],k.b[3])-Math.max(p.b[1],k.b[1]));return ix*iy>0.3*(k.b[2]-k.b[0])*(k.b[3]-k.b[1]);}))continue;picked.push(k);}
@@ -513,17 +514,23 @@ function tightBox(m,cw,ch,X0,Y0,X1,Y1){
   return [bx0+RX0,by0+RY0,bx1+RX0+1,by1+RY0+1];
 }
 
-function analyse(rot){rot=rot||0;
+function analyse(rot,opt){rot=rot||0;opt=opt||{};
   const M=master,W=M.w,H=M.h;
   // 1. crop at working resolution (optionally rotated, for sideways photos)
-  const sc=Math.min(1,1800/Math.max(rect.w,rect.h*0.75));const dw=Math.max(40,Math.round(rect.w*sc)),dh=Math.max(20,Math.round(rect.h*sc));
-  const crop=document.createElement("canvas");if(rot%180){crop.width=dh;crop.height=dw;}else{crop.width=dw;crop.height=dh;}
-  const cw=crop.width,ch=crop.height;const cx=crop.getContext("2d",{willReadFrequently:true});cx.imageSmoothingQuality="high";
+  let sc,cw,ch,crop,cx,map;
+  if(opt.view){const V=opt.view;sc=V.scale;crop=document.createElement("canvas");crop.width=cw=Math.max(40,Math.round(V.w*sc));crop.height=ch=Math.max(20,Math.round(V.h*sc));
+    cx=crop.getContext("2d",{willReadFrequently:true});cx.imageSmoothingQuality="high";cx.fillStyle=meanColour();cx.fillRect(0,0,cw,ch);
+    cx.save();cx.translate(cw/2,ch/2);cx.rotate(rot*Math.PI/180);cx.scale(sc,sc);cx.translate(-V.cx,-V.cy);cx.drawImage(src,rect.x,rect.y,rect.w,rect.h,rect.x,rect.y,rect.w,rect.h);cx.restore();
+    map={cx:V.cx,cy:V.cy,sc,rot,cw,ch};}
+  else{sc=Math.min(1,1800/Math.max(rect.w,rect.h*0.75));const dw=Math.max(40,Math.round(rect.w*sc)),dh=Math.max(20,Math.round(rect.h*sc));
+  crop=document.createElement("canvas");if(rot%180){crop.width=dh;crop.height=dw;}else{crop.width=dw;crop.height=dh;}
+  cw=crop.width;ch=crop.height;cx=crop.getContext("2d",{willReadFrequently:true});cx.imageSmoothingQuality="high";
   cx.save();cx.translate(cw/2,ch/2);cx.rotate(rot*Math.PI/180);cx.drawImage(src,rect.x,rect.y,rect.w,rect.h,-dw/2,-dh/2,dw,dh);cx.restore();
+  map={cx:rect.x+rect.w/2,cy:rect.y+rect.h/2,sc:dw/rect.w,rot,cw,ch};}
   const px=cx.getImageData(0,0,cw,ch).data;
   // 2. separate ink from surface
   const pol=$("polarity").value;
-  const kinds=pol==="light"?["light"]:pol==="dark"?["dark","deep"]:pol==="carton"?["blue","deep"]:["light","dark","deep","blue"];
+  const kinds=opt.kind?[opt.kind]:pol==="light"?["light"]:pol==="dark"?["dark","deep"]:pol==="carton"?["blue","deep"]:["light","dark","deep","blue"];
   const chan={};for(const kd of kinds){const v=new Uint8Array(cw*ch),fn=INK[kd];for(let i=0;i<cw*ch;i++)v[i]=fn(px[4*i],px[4*i+1],px[4*i+2]);chan[kd]=v;}
   function bin(v){const t=otsu(v);const m=new Uint8Array(v.length);let s=0;for(let i=0;i<v.length;i++){m[i]=v[i]>t?1:0;s+=m[i];}return {m,frac:s/v.length};}
   const r0=Math.max(1,Math.round(cw/900));
@@ -533,8 +540,8 @@ function analyse(rot){rot=rot||0;
   let found=null,fv=null,fk=null;
   for(const kd of kinds){const v=chan[kd];const fl=new Float32Array(v.length);for(let i=0;i<v.length;i++)fl[i]=v[i];const lm=boxBlur(fl,cw,ch,LR);
     let am=new Uint8Array(v.length);for(let i=0;i<v.length;i++)am[i]=v[i]>lm[i]+20?1:0;am=dilate(erode(am,cw,ch,r0),cw,ch,r0);
-    for(const mk of [am,dilate(erode(bin(v).m,cw,ch,r0),cw,ch,r0)]){const f=findLogo(mk,cw,ch,M);if(f){f.rank=f.corr+(kd==="blue"?0.06:0);if(!found||f.rank>found.rank){found=f;fv=v;fk=kd;}}}}
-  const userBox=!(rect.x<=1&&rect.y<=1&&rect.w>=src.width-2&&rect.h>=src.height-2);
+    for(const mk of [am,dilate(erode(bin(v).m,cw,ch,r0),cw,ch,r0)]){const f=findLogo(mk,cw,ch,M,opt.view?0.4:0.2);if(f){f.rank=f.corr+(kd==="blue"?0.06:0);if(!found||f.rank>found.rank){found=f;fv=v;fk=kd;}}}}
+  const userBox=!opt.view&&!(rect.x<=1&&rect.y<=1&&rect.w>=src.width-2&&rect.h>=src.height-2);
   let m,inkKind=kinds[0];
   if(found&&found.corr>=0.35){inkKind=fk;
     // re-threshold only around the logo for a clean shape
@@ -599,7 +606,7 @@ function analyse(rot){rot=rot||0;
   const marks=regions.filter(r=>r.presence);const overall=Object.assign({},body);
   if(marks.length){const ms=marks.reduce((a,r)=>a+r.score,0)/marks.length;overall.score=body.score*0.9+ms*0.1;}
   overall.specks=specks;
-  return {overall,regions,W,H,R,Cs,missing,extra,Pw,padView,fit:best,rot,inkKind,dbg:{crop,m,box:bb,corr:found.corr}};
+  return {overall,regions,W,H,R,Cs,missing,extra,Pw,padView,fit:best,rot,inkKind,sharp:sharpness(Pw,W,H,R,inkKind),dbg:{crop,m,box:bb,corr:found.corr,map}};
 }
 // Small marks (™): read the aligned photo directly (no clean-up filter, which erases thin strokes).
 // Score = how well the photo's brightness pattern follows the master's ™ shape, and how strong its contrast is
@@ -631,7 +638,7 @@ function markCheck(Pw,pv,W,H,R,g,inkKind){
     const at=(ox,oy)=>{const u0=Math.round(cxm+ox-tw/2)+MX,v0=Math.round(cym+oy-th/2)+MY;if(u0<0||v0<0||u0+tw>PW||v0+th>PH)return -2;
       let sv=0,svv=0,svt=0;for(let y=0;y<th;y++){const row=(v0+y)*PW+u0;for(let x=0;x<tw;x++){const v=Q[row+x];if(v<-9000)return -2;const t=Tb[y*tw+x];sv+=v;svv+=v*v;svt+=v*t;}}
       const vv=svv-sv*sv/n;if(vv<1e-6)return -2;return (svt-sv*st/n)/Math.sqrt(vv*tvar);};
-    const stp=Math.max(1,Math.round(s/1.4));let lb={c:-2};
+    const stp=Math.max(2,Math.round(s/1.4));let lb={c:-2};
     for(let oy=-ry;oy<=ry;oy+=stp)for(let ox=-rx;ox<=rx;ox+=stp){const c=at(ox,oy);if(c>lb.c)lb={c,ox,oy};}
     if(stp>1&&lb.c>-2){const o=lb;for(let oy=o.oy-stp+1;oy<o.oy+stp;oy++)for(let ox=o.ox-stp+1;ox<o.ox+stp;ox++){const c=at(ox,oy);if(c>lb.c)lb={c,ox,oy};}}
     if(lb.c>0.6){const u0=Math.round(cxm+lb.ox-tw/2)+MX,v0=Math.round(cym+lb.oy-th/2)+MY;cands.push({corr:lb.c,s,ox:lb.ox,oy:lb.oy,u0,v0,tw,th,T});}
@@ -656,7 +663,68 @@ function markCheck(Pw,pv,W,H,R,g,inkKind){
   return {score:100*pick.sc,corr:pick.corr,ratio:pick.ratio,snr:pick.snr,s:pick.s,ox:pick.ox,oy:pick.oy};
 }
 
+
+/* ---------- fast locate: position, any angle (0-360) and ink type, on a small copy of the photo ---------- */
+function inkKinds(){const pol=$("polarity").value;return pol==="light"?["light"]:pol==="dark"?["dark","deep"]:pol==="carton"?["blue","deep"]:["light","dark","deep","blue"];}
+function meanColour(){const c=document.createElement("canvas");c.width=c.height=1;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(src,rect.x,rect.y,rect.w,rect.h,0,0,1,1);const d=x.getImageData(0,0,1,1).data;return `rgb(${d[0]},${d[1]},${d[2]})`;}
+function locateLogo(){
+  const M=master,MA=M.w/M.h;const s0=Math.min(1,720/Math.max(rect.w,rect.h));const sw=Math.max(8,Math.round(rect.w*s0)),sh=Math.max(8,Math.round(rect.h*s0)),N=sw*sh;
+  const c=document.createElement("canvas");c.width=sw;c.height=sh;const x=c.getContext("2d",{willReadFrequently:true});x.imageSmoothingQuality="high";x.drawImage(src,rect.x,rect.y,rect.w,rect.h,0,0,sw,sh);
+  const px=x.getImageData(0,0,sw,sh).data;const T=masterTemplate(M,64);const LR=Math.max(6,Math.round(Math.max(sw,sh)/25));
+  const out=[];
+  for(const kd of inkKinds()){
+    const fn=INK[kd];const fl=new Float32Array(N);for(let i=0;i<N;i++)fl[i]=fn(px[4*i],px[4*i+1],px[4*i+2]);
+    const lm=boxBlur(fl,sw,sh,LR);let am=new Uint8Array(N);for(let i=0;i<N;i++)am[i]=fl[i]>lm[i]+20?1:0;
+    const mf=new Float32Array(N);for(let i=0;i<N;i++)mf[i]=am[i];const mb=blur3(mf,sw,sh,1);
+    const samp=(X,Y)=>{if(X<0||Y<0||X>sw-1||Y>sh-1)return 0;const x0=X|0,y0=Y|0,x1=Math.min(x0+1,sw-1),y1=Math.min(y0+1,sh-1),fx=X-x0,fy=Y-y0;return (mb[y0*sw+x0]*(1-fx)+mb[y0*sw+x1]*fx)*(1-fy)+(mb[y1*sw+x0]*(1-fx)+mb[y1*sw+x1]*fx)*fy;};
+    for(const rc of [Math.max(2,Math.round(Math.max(sw,sh)/90)),Math.max(3,Math.round(Math.max(sw,sh)/40))]){
+      const cl=erode(dilate(am,sw,sh,rc),sw,sh,rc);const cc=components(cl,sw,sh);
+      const ids=[];for(let k=1;k<=cc.n;k++)if(cc.sizes[k]>=0.0015*N)ids.push(k);ids.sort((a,b)=>cc.sizes[b]-cc.sizes[a]);
+      for(const L of ids.slice(0,4)){
+        const xs=[],ys=[];for(let i=0;i<N;i++)if(cc.lab[i]===L&&am[i]){xs.push(i%sw);ys.push((i/sw)|0);}
+        const n=xs.length;if(n<40)continue;let mx=0,my=0;for(let i=0;i<n;i++){mx+=xs[i];my+=ys[i];}mx/=n;my/=n;
+        let cxx=0,cyy=0,cxy=0;for(let i=0;i<n;i++){const dx=xs[i]-mx,dy=ys[i]-my;cxx+=dx*dx;cyy+=dy*dy;cxy+=dx*dy;}
+        const phi=0.5*Math.atan2(2*cxy,cxx-cyy)*180/Math.PI;
+        const evalAt=deg=>{const a=deg*Math.PI/180,co=Math.cos(a),si=Math.sin(a);let u0=1e9,u1=-1e9,v0=1e9,v1=-1e9;
+          for(let i=0;i<n;i++){const u=xs[i]*co-ys[i]*si,v=xs[i]*si+ys[i]*co;if(u<u0)u0=u;if(u>u1)u1=u;if(v<v0)v0=v;if(v>v1)v1=v;}
+          u1+=1;v1+=1;const bw=u1-u0,bh=v1-v0;if(bw<12||bh<3)return null;
+          let sv=0,svv=0,svz=0;const tn=T.tw*T.th;
+          for(let ty=0;ty<T.th;ty++)for(let tx=0;tx<T.tw;tx++){let s=0;for(const oy of [.25,.75])for(const ox of [.25,.75]){const u=u0+(tx+ox)*bw/T.tw,v=v0+(ty+oy)*bh/T.th;s+=samp(u*co+v*si,-u*si+v*co);}
+            s/=4;sv+=s;svv+=s*s;svz+=s*T.z[ty*T.tw+tx];}
+          const vv=svv-sv*sv/tn;let corr=vv>1e-9?svz/Math.sqrt(vv*T.zz):-1;
+          const ar=Math.abs(Math.log((bw/bh)/MA));if(ar>0.45)corr-=0.3*(ar-0.45);
+          return {corr,deg,u0,u1,v0,v1};};
+        const bases=[-phi,-phi+180,0,90,180,270];
+        for(const b0 of bases){let r=evalAt(b0);if(!r)continue;
+          if(b0===bases[0]||b0===bases[1]){for(const st of [3,1.5,0.75]){for(const sg of [1,-1]){const q=evalAt(r.deg+sg*st);if(q&&q.corr>r.corr)r=q;}}}
+          r.kind=kd;r.rank=r.corr+((kd==="blue"||kd==="cool")?0.06:0);r.s0=s0;out.push(r);}
+      }
+    }
+  }
+  out.sort((a,b)=>b.rank-a.rank);
+  const list=[];for(const r of out){const d=((r.deg%360)+360)%360;if(list.some(o=>{const e=Math.abs(o.rot-d);return Math.min(e,360-e)<10;}))continue;
+    const a=r.deg*Math.PI/180,co=Math.cos(a),si=Math.sin(a);const uc=(r.u0+r.u1)/2,vc=(r.v0+r.v1)/2;
+    const cx=rect.x+(uc*co+vc*si)/s0,cy=rect.y+(-uc*si+vc*co)/s0;const bw=(r.u1-r.u0)/s0,bh=(r.v1-r.v0)/s0;const lw=Math.max(bw,bh*MA);
+    list.push({rot:d,kind:r.kind,corr:r.corr,rank:r.rank,view:{cx,cy,w:lw*1.6,h:Math.max(bh,lw/MA)*2.6,scale:Math.min(1,1150/lw)}});if(list.length>=3)break;}
+  return list;
+}
+// edge sharpness of the aligned photo, as blur radius in master pixels (master is 900 px wide)
+function sharpness(Pw,W,H,R,inkKind){const fn=INK[inkKind];const v=new Float32Array(W*H);for(let i=0;i<W*H;i++)v[i]=fn(Pw[3*i],Pw[3*i+1],Pw[3*i+2]);
+  const eR=erode(R,W,H,3),dR=dilate(R,W,H,5);let si=0,ni=0,sb=0,nb=0;for(let i=0;i<W*H;i++){if(eR[i]){si+=v[i];ni++;}else if(!dR[i]&&(Pw[3*i]||Pw[3*i+1]||Pw[3*i+2])){sb+=v[i];nb++;}}
+  if(!ni||!nb)return null;const span=Math.abs(si/ni-sb/nb);if(span<12)return null;
+  const band=dilate(R,W,H,1),inn=erode(R,W,H,1);const g=[];
+  for(let y=2;y<H-2;y++)for(let x=2;x<W-2;x++){const i=y*W+x;if(!band[i]||inn[i])continue;const gx=(v[i+1]-v[i-1])/2,gy=(v[i+W]-v[i-W])/2;g.push(Math.hypot(gx,gy));}
+  if(g.length<50)return null;g.sort((a,b)=>a-b);const gp=g[Math.floor(g.length*0.8)];
+  return {sigma:span/(Math.max(gp,1e-3)*2.5066),span};}
+const BLUR_SOFT=2.6,BLUR_RETAKE=3.6;
 function analyseBest(){const acc=+$("tAcc").value||90;let best=null,err=null;
+  // fast path: find the logo and its angle on a small copy, then check only that area at that angle
+  let list=[];try{list=locateLogo();}catch(e){list=[];}
+  if(list.length&&list[0].corr>=0.45){
+    for(const c of list.slice(0,2)){if(best&&best.overall.score>=acc)break;if(c!==list[0]&&c.rank<0.85*list[0].rank)break;
+      try{const r=analyse(c.rot,{view:c.view,kind:c.kind});if(!best||r.overall.score>best.overall.score)best=r;}catch(e){err=err||e;}}
+    if(best&&best.fit>=0.6)return best;}
+  // fallback: the original full search (0, 90, 270, 180 degrees, every ink type)
   for(const rot of [0,90,270,180]){
     try{const r=analyse(rot);if(!best||r.overall.score>best.overall.score)best=r;}catch(e){err=err||e;}
     if(best&&best.overall.score>=acc&&best.fit>=0.8)break;}
@@ -684,9 +752,12 @@ function showResult(res){
   const regRows=res.regions.map(r=>{if(r.presence){const k=r.score>=80?"pass":r.score>=50?"warn":"fail";return `<tr data-mark="${r.dbg.corr.toFixed(3)} ${r.dbg.ratio.toFixed(3)} ${(r.dbg.snr||0).toFixed(2)} s${(r.dbg.s||0).toFixed(1)}"><td>${r.name}</td><td style="width:38%"><div class="bar"><b style="width:${r.score.toFixed(1)}%;background:${gradeColor(k)}"></b></div></td><td class="num">${r.score.toFixed(0)}%</td><td><span class="tag v-${k}">${k==="pass"?"OK":k==="warn"?"Faint":"Missing"}</span></td></tr>`;}const gg=grade(r.score);return `<tr><td>${r.name}</td><td style="width:38%"><div class="bar"><b style="width:${Math.max(0,Math.min(100,r.score)).toFixed(1)}%;background:${gradeColor(gg.k)}"></b></div></td><td class="num">${r.score.toFixed(1)}%</td><td><span class="tag v-${gg.k}">${gg.k==="pass"?"OK":gg.k==="warn"?"Check":"Wrong"}</span></td></tr>`;}).join("");
   const issues=[];res.regions.forEach(r=>{if(r.presence){if(r.score<50)issues.push(`<li><b>${r.name}</b>: not found. Check it is printed; glare on the ™ can also hide it, so retake if unsure.</li>`);else if(r.score<80)issues.push(`<li><b>${r.name}</b>: printed but faint or blurred.</li>`);return;}if(r.score>=(+$("tAcc").value||90))return;const parts=[];if(r.missPct>=3)parts.push(`${r.missPct.toFixed(0)}% of the ink is missing or faded`);if(r.extraPct>=3)parts.push(`extra ink, smudge or glare equal to ${r.extraPct.toFixed(0)}% of the area`);if(!parts.length)parts.push("shape or spacing differs from the master");issues.push(`<li><b>${r.name}</b>: ${parts.join("; ")}.</li>`);});
   const lowFit=res.fit<0.8?`<p class="hint">Alignment confidence is low. Retake the photo straight-on, without glare, and box only the logo before deciding.</p>`:"";
+  const blur=res.sharp?res.sharp.sigma:0;let blurNote="";
+  if(blur>BLUR_RETAKE)g={k:"warn",word:"Retake photo",why:"The photo is not sharp enough to judge the print (out of focus, camera moved, or taken too far away). Tap the logo on the camera screen to focus, hold still, and take it again."};
+  else if(blur>BLUR_SOFT)blurNote=`<p class="hint">Photo is slightly soft. The result is usable, but for a borderline score retake it: tap the logo on the camera screen to focus and hold still.</p>`;
   $("result").innerHTML=`
     ${readoutHTML(s,g)}
-    ${lowFit}
+    ${lowFit}${blurNote}
     <table class="regions"><thead><tr><th>Area</th><th></th><th style="text-align:right">Match</th><th></th></tr></thead><tbody>${regRows}</tbody></table>
     ${issues.length?`<ul class="issues">${issues.join("")}</ul>`:`<p class="hint">No area below the accept level.</p>`}
     <div class="toggle" role="group" aria-label="View"><button data-m="diff" aria-pressed="${mode==="diff"}">Difference map</button><button data-m="photo" aria-pressed="${mode==="photo"}">Aligned photo</button></div>
@@ -694,7 +765,7 @@ function showResult(res){
     <div class="legend"><span style="--c:#eb372d">Missing vs master</span><span style="--c:#ffb000">Extra ink, smudge or glare</span><span style="--c:#e1e1e1">Matches</span></div>
     <div class="row" style="margin-top:14px"><button class="primary" id="pdfBtn">Download PDF report</button><button id="printBtn">Print report</button><span class="hint" id="repNote" style="margin:0"></span></div>
     <details id="seen" ${s<(+$("tAcc").value||90)?"open":""}><summary>What the app saw</summary>
-      <p class="hint">Cyan = what was read as logo ink. Yellow box = where the logo was found${res.rot?` (photo was turned ${res.rot}° to read it)`:""}. If the yellow box is not around the whole logo, or cyan covers glare or panel edges, retake the photo or redraw your box.</p>
+      <p class="hint">Cyan = what was read as logo ink. Yellow box = where the logo was found${res.rot?` (photo was turned ${Math.round(res.rot)}° to read it)`:""}. If the yellow box is not around the whole logo, or cyan covers glare or panel edges, retake the photo or redraw your box.</p>
       <div class="diffwrap" style="background:transparent"><canvas id="seenCanvas" style="min-width:0"></canvas></div></details>`;
   renderDiff(res,$("diffCanvas"));renderSeen(res,$("seenCanvas"));animateReadout(s,g.k);
   $("result").querySelectorAll(".toggle button").forEach(b=>b.onclick=()=>{mode=b.dataset.m;$("result").querySelectorAll(".toggle button").forEach(o=>o.setAttribute("aria-pressed",o===b));renderDiff(lastRes,$("diffCanvas"));});
@@ -800,10 +871,12 @@ const lockEl = (() => { const d = document.createElement("div"); d.className = "
 
 function placeLock(res){
   lockEl.className = "lock";
-  if (!res || res.rot || !src) return false;
-  const { crop, box } = res.dbg; const kx = rect.w / crop.width, ky = rect.h / crop.height;
-  const x = rect.x + box[0] * kx, y = rect.y + box[1] * ky, w = (box[2] - box[0]) * kx, h = (box[3] - box[1]) * ky;
-  Object.assign(lockEl.style, { left: (100 * x / src.width) + "%", top: (100 * y / src.height) + "%", width: (100 * w / src.width) + "%", height: (100 * h / src.height) + "%" });
+  lockEl.className="lock";if(!res||!src||!res.dbg.map)return false;
+  const {box,map}=res.dbg;const a=map.rot*Math.PI/180,co=Math.cos(a),si=Math.sin(a);
+  const qx=(box[0]+box[2])/2-map.cw/2,qy=(box[1]+box[3])/2-map.ch/2;const cx=map.cx+(qx*co+qy*si)/map.sc,cy=map.cy+(-qx*si+qy*co)/map.sc;
+  const w=(box[2]-box[0])/map.sc,h=(box[3]-box[1])/map.sc;
+  Object.assign(lockEl.style,{left:(100*(cx-w/2)/src.width)+"%",top:(100*(cy-h/2)/src.height)+"%",width:(100*w/src.width)+"%",height:(100*h/src.height)+"%",rotate:(-map.rot)+"deg"});
+  lockEl.classList.toggle("flip",map.rot>90&&map.rot<270);
   if (lockEl.parentNode !== $("viewHold")) $("viewHold").appendChild(lockEl);
   void lockEl.offsetWidth; lockEl.classList.add("on"); return true;
 }
@@ -816,7 +889,7 @@ async function runCheck(){
   steps.forEach(li => li.className = ""); bar.style.width = "0"; lockEl.className = "lock";
   $("result").classList.add("pending");
   scan.className = "scan on";
-  const k = RM ? 0 : 1;
+  const k = RM ? 0 : 0.35;
   const step = async (i, ms) => { steps.forEach((li, j) => li.className = j < i ? "ok" : j === i ? "act" : ""); bar.style.width = (100 * (i + .5) / steps.length) + "%"; await sleep(ms * k); };
   await step(0, 600);
   await step(1, 300);
