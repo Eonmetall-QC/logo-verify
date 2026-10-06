@@ -2,7 +2,7 @@
   "name": "Logo Verify | Eonmetall",
   "short_name": "Logo Verify",
   "description": "Customer logo inspection for incoming and internal parts.",
-  "id": "./",
+  "id": "/logo-verify/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

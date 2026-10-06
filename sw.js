@@ -1,5 +1,5 @@
 // Logo Verify service worker: lets the installed app open and work without internet.
-const CACHE = "logoverify-v3";
+const CACHE = "logoverify-v4";
 const CORE = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
   "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"];
 self.addEventListener("install", e => {
